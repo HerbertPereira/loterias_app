@@ -17,6 +17,7 @@ LOTOFACIL_PRICES = {15: 3.00, 16: 48.00, 17: 408.00, 18: 2448.00, 19: 11628.00, 
 # --- FUNÇÕES DE WEB SCRAPING (COM TRATAMENTO DE ERROS) ---
 @st.cache_data(ttl=3600)
 def fetch_megasena_data():
+    # Esta função continua funcionando bem.
     url = "https://www.megasena.com/resultados"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     try:
@@ -52,6 +53,7 @@ def fetch_megasena_data():
 
 @st.cache_data(ttl=3600)
 def fetch_lotofacil_data():
+    # --- FUNÇÃO ATUALIZADA ---
     url = "https://www.lotodicas.com.br/resultados-da-lotofacil"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     try:
@@ -59,20 +61,28 @@ def fetch_lotofacil_data():
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         data = []
-        tables = soup.find_all('table', class_='table-bordered')
-        if not tables:
-            st.error("Nenhuma tabela de resultados encontrada no site da Lotofácil. O layout pode ter mudado.")
+        # O site agora usa divs para cada concurso. Procuramos por 'container-lotofacil-left'
+        concursos = soup.find_all('div', class_='container-lotofacil-left')
+        if not concursos:
+            st.error("Nenhuma div de concurso encontrada no site da Lotofácil. O layout pode ter mudado.")
             return None
-        for table in tables:
-            rows = table.find_all('tr')
-            if len(rows) < 2: continue
-            header_text = rows[0].th.get_text(strip=True)
-            if "Concurso" not in header_text: continue
-            concurso_num = header_text.split(' ')[1]
-            dezenas_tags = rows[1].find_all('td', class_='bg-primary')
+        
+        for concurso in concursos:
+            # Pega o número do concurso de dentro de um link
+            concurso_tag = concurso.find('a', class_='concurso-lotofacil')
+            if not concurso_tag: continue
+            concurso_num = concurso_tag.get_text(strip=True).split(' ')[1]
+
+            # Pega as dezenas, que agora estão em tags 'td' com a classe 'bg-primary'
+            dezenas_tags = concurso.find_all('td', class_='bg-primary')
             if len(dezenas_tags) == 15:
                 dezenas = [int(tag.text.strip()) for tag in dezenas_tags]
                 data.append([concurso_num] + dezenas)
+        
+        if not data:
+            st.error("Não foi possível extrair os dados dos concursos da Lotofácil. Verifique o layout do site.")
+            return None
+
         columns = ['Concurso'] + [f'Dezena{i}' for i in range(1, 16)]
         df = pd.DataFrame(data, columns=columns)
         df['Concurso'] = pd.to_numeric(df['Concurso'], errors='coerce')
@@ -84,7 +94,7 @@ def fetch_lotofacil_data():
         st.error(f"Ocorreu um erro inesperado ao processar os dados da Lotofácil: {e}")
         return None
 
-# --- FUNÇÕES DE ANÁLISE E SUGESTÃO ---
+# --- FUNÇÕES DE ANÁLISE E SUGESTÃO (sem alterações) ---
 @st.cache_data
 def analyze_numbers(data, num_dezenas_sorteadas):
     if data is None or data.empty: return pd.Series(), [], []
