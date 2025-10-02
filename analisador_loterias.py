@@ -14,24 +14,20 @@ PRIMOS_LOTOFACIL = [p for p in PRIMOS_MEGA_SENA if p <= 25]
 MEGA_SENA_PRICES = {6: 5.00, 7: 35.00, 8: 140.00, 9: 420.00, 10: 1050.00, 11: 2310.00, 12: 4620.00, 13: 8580.00, 14: 15015.00, 15: 25025.00}
 LOTOFACIL_PRICES = {15: 3.00, 16: 48.00, 17: 408.00, 18: 2448.00, 19: 11628.00, 20: 46512.00}
 
-# --- FUNÇÕES DE WEB SCRAPING (COM TRATAMENTO DE ERROS) ---
+# --- FUNÇÕES DE BUSCA DE DADOS ---
 @st.cache_data(ttl=3600)
 def fetch_megasena_data():
-    # Esta função continua funcionando bem.
+    # A fonte da Mega-Sena continua estável
     url = "https://www.megasena.com/resultados"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         h2 = soup.find('h2', string='Resultados anteriores')
-        if not h2:
-            st.error("Não foi possível encontrar a seção 'Resultados anteriores' no site da Mega-Sena. O layout pode ter mudado.")
-            return None
+        if not h2: return None
         target_table = h2.find_next_sibling('table')
-        if not target_table:
-            st.error("Não foi possível encontrar a tabela de resultados da Mega-Sena.")
-            return None
+        if not target_table: return None
         data = []
         rows = target_table.find_all('tr')
         for row in rows:
@@ -44,54 +40,47 @@ def fetch_megasena_data():
         df = pd.DataFrame(data, columns=['Concurso'] + [f'Dezena{i}' for i in range(1, 7)])
         df['Concurso'] = pd.to_numeric(df['Concurso'], errors='coerce')
         return df.sort_values(by='Concurso', ascending=True).reset_index(drop=True)
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erro de conexão ao buscar dados da Mega-Sena: {e}")
-        return None
     except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao processar os dados da Mega-Sena: {e}")
+        st.error(f"Erro ao buscar dados da Mega-Sena: {e}")
         return None
 
 @st.cache_data(ttl=3600)
 def fetch_lotofacil_data():
-    # --- FUNÇÃO ATUALIZADA ---
-    url = "https://www.lotodicas.com.br/resultados-da-lotofacil"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    # --- NOVA FUNÇÃO USANDO UMA API PÚBLICA MAIS ESTÁVEL ---
+    # Este API é um projeto comunitário que organiza os dados da Caixa
+    url = "https://loteriascaixa-api.herokuapp.com/api/lotofacil"
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        data = []
-        # O site agora usa divs para cada concurso. Procuramos por 'container-lotofacil-left'
-        concursos = soup.find_all('div', class_='container-lotofacil-left')
-        if not concursos:
-            st.error("Nenhuma div de concurso encontrada no site da Lotofácil. O layout pode ter mudado.")
-            return None
-        
-        for concurso in concursos:
-            # Pega o número do concurso de dentro de um link
-            concurso_tag = concurso.find('a', class_='concurso-lotofacil')
-            if not concurso_tag: continue
-            concurso_num = concurso_tag.get_text(strip=True).split(' ')[1]
+        json_data = response.json() # Recebe os dados em formato JSON, muito mais fácil de ler
 
-            # Pega as dezenas, que agora estão em tags 'td' com a classe 'bg-primary'
-            dezenas_tags = concurso.find_all('td', class_='bg-primary')
-            if len(dezenas_tags) == 15:
-                dezenas = [int(tag.text.strip()) for tag in dezenas_tags]
-                data.append([concurso_num] + dezenas)
+        if not json_data or not isinstance(json_data, list):
+            st.error("A resposta da API da Lotofácil não veio no formato esperado.")
+            return None
+
+        # Processa os dados JSON para criar o DataFrame
+        data = []
+        for concurso in json_data:
+            concurso_num = concurso.get('concurso')
+            dezenas_str = concurso.get('dezenas')
+            if concurso_num is not None and dezenas_str and len(dezenas_str) == 15:
+                # A API retorna as dezenas como strings, convertemos para inteiros
+                dezenas_int = [int(d) for d in dezenas_str]
+                data.append([concurso_num] + dezenas_int)
         
         if not data:
-            st.error("Não foi possível extrair os dados dos concursos da Lotofácil. Verifique o layout do site.")
+            st.error("Não foi possível extrair dados válidos da API da Lotofácil.")
             return None
 
         columns = ['Concurso'] + [f'Dezena{i}' for i in range(1, 16)]
         df = pd.DataFrame(data, columns=columns)
-        df['Concurso'] = pd.to_numeric(df['Concurso'], errors='coerce')
         return df.sort_values(by='Concurso', ascending=True).reset_index(drop=True)
     except requests.exceptions.RequestException as e:
-        st.error(f"Erro de conexão ao buscar dados da Lotofácil: {e}")
+        st.error(f"Erro de conexão ao buscar dados da API da Lotofácil: {e}")
         return None
     except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao processar os dados da Lotofácil: {e}")
+        st.error(f"Ocorreu um erro inesperado ao processar os dados da API da Lotofácil: {e}")
         return None
 
 # --- FUNÇÕES DE ANÁLISE E SUGESTÃO (sem alterações) ---
@@ -115,7 +104,7 @@ def plot_frequencies(frequencies, title, universe_max):
     fig, ax = plt.subplots(figsize=(15, 7))
     ax.bar(full_range_freq.index, full_range_freq.values, color='skyblue')
     ax.set_title(title, fontsize=16)
-    ax.set_xlabel('Número', fontsize=14); ax.set_ylabel('Frequência', fontsize=14)
+    ax.set_xlabel('Número'); ax.set_ylabel('Frequência')
     ax.set_xticks(np.arange(1, universe_max + 1, 1))
     ax.tick_params(axis='x', labelrotation=90, labelsize=8)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -159,7 +148,7 @@ def main():
     elif loteria_selecionada == "Lotofácil":
         st.title("🍀 Analisador Estratégico - Lotofácil")
         if st.button("📊 Buscar Resultados da Lotofácil"):
-            with st.spinner("Buscando dados..."):
+            with st.spinner("Buscando dados da API..."):
                 st.session_state['lf_data'] = fetch_lotofacil_data()
         if 'lf_data' in st.session_state and st.session_state['lf_data'] is not None:
             freq, most, least = analyze_numbers(st.session_state['lf_data'], 15)
